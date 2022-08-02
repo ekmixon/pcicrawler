@@ -50,32 +50,26 @@ def jsonify(dev, hexify=False, vpd=False, aer=False):
                 (4, 'subsystem_device'),
                 (6, 'class_id')):
             jd[key] = '{:0{pad}x}'.format(jd[key], pad=pad)
-    if vpd:
-        if dev.vpd:
-            jd['vpd'] = dev.vpd
+    if vpd and dev.vpd:
+        jd['vpd'] = dev.vpd
     if aer:
-        aer_info = dev.express_aer
-        if aer_info:
+        if aer_info := dev.express_aer:
             jd['aer'] = aer_info
     return jd
 
 
 def print_tree_level(devgroups, indent, roots):  # noqa: C901
     spc = indent
-    n = 0
     sfx = ' \u2502 '
     dmislots = get_dmidecode_pci_slots()
-    for dev in roots:
-        n += 1
+    for n, dev in enumerate(roots, start=1):
         last = n == len(roots)
         addr = dev.device_name
         dispaddr = maybe_shorten_pci_addr(addr)
         exptype = dev.express_type
-        explink = dev.express_link
-        slot = dev.express_slot
         dmidev = dmislots.get(addr)
         if last and spc:
-            indent = indent[:-3] + '   '
+            indent = f'{indent[:-3]}   '
             spc = spc[:-3] + ' \u2514\u2500'
         elif spc:
             spc = spc[:-3] + ' \u251C\u2500'
@@ -85,18 +79,18 @@ def print_tree_level(devgroups, indent, roots):  # noqa: C901
         else:
             treeline += click.style('PCI', underline=True)
         if dmidev:
-            treeline += ', "{}"'.format(dmidev["designation"])
-        if slot:
+            treeline += f', "{dmidev["designation"]}"'
+        if slot := dev.express_slot:
             treeline += f', slot {click.style(str(slot.slot), fg="blue")}'
             if slot.presence:
                 treeline += ', ' + click.style('device present', fg="blue")
             if slot.power is not None:
                 power = 'On' if slot.power else 'Off'
                 color = 'green' if slot.power else 'red'
-                treeline += ', power: ' + click.style(power, fg=color)
-            if slot.attn_led != 'unsupported' and slot.attn_led != 'off':
+                treeline += f', power: {click.style(power, fg=color)}'
+            if slot.attn_led not in ['unsupported', 'off']:
                 treeline += ', attn: ' + click.style(slot.attn_led, fg='red')
-        if explink:
+        if explink := dev.express_link:
             if exptype in {'downstream_port', 'root_port'} and \
                explink.cur_width != 0:
                 treeline += ', speed ' + \
@@ -128,15 +122,12 @@ def print_tree(devs):
     roots = []
     devgroups = {}
     for dev in devs:
-        parent = dev.parent
-        if parent:
+        if parent := dev.parent:
             parentid = parent.device_name
             if parentid in devgroups:
                 devgroups[parentid].append(dev)
             else:
                 devgroups[parentid] = [dev]
-        # Only find devices under a root port (don't display built-in "devices"
-        # in the tree view)
         elif dev.express_type == 'root_port':
             roots.append(dev)
     print_tree_level(devgroups, '', roots)
@@ -238,10 +229,7 @@ def main(
         try:
             vid, did = device.split(':')
             vid = int(vid, 16)
-            if did:
-                did = int(did, 16)
-            else:
-                did = None
+            did = int(did, 16) if did else None
         except Exception as e:
             raise click.ClickException(
                 f'Could not parse vendor/device id: {e}')
@@ -302,15 +290,13 @@ def main(
             if verbose:
                 debugging_data = dev.get_debugging_details()
                 click.echo(f'  debug: {debugging_data}')
-            if vpd:
-                if dev.vpd:
-                    ident = dev.vpd['identifier_string']
-                    if ident:
-                        click.echo('  VPD Identifier: '
-                                   f'{click.style(ident, bold=True)}')
-                    for k, v in dev.vpd['fields'].items():
-                        click.echo(f'    {click.style(k, fg="blue")}='
-                                   f'{click.style(v, bold=True)}')
+            if vpd and dev.vpd:
+                if ident := dev.vpd['identifier_string']:
+                    click.echo('  VPD Identifier: '
+                               f'{click.style(ident, bold=True)}')
+                for k, v in dev.vpd['fields'].items():
+                    click.echo(f'    {click.style(k, fg="blue")}='
+                               f'{click.style(v, bold=True)}')
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ class VitalProductDataReader:
         # Each item header is 3 bytes long. 2 bytes for the key and 1
         # byte for the length of the data
         while len(data) >= 3:
-            key = data[0:2].decode('ascii')
+            key = data[:2].decode('ascii')
             length = bytearray(data[2:3])[0]
 
             # Check if we have enough data
@@ -112,9 +112,9 @@ class VitalProductDataReader:
                 if len(value) < l:
                     raise VPDDataException('VPD data is truncated!')
                 checksum =\
-                    self._combine_checksum(checksum, bytearray([header_sum]))
+                        self._combine_checksum(checksum, bytearray([header_sum]))
                 checksum =\
-                    self._combine_checksum(checksum, bytearray(value))
+                        self._combine_checksum(checksum, bytearray(value))
 
                 value = self._value_to_str(value).strip()
                 self.identifier_string = value
@@ -125,9 +125,9 @@ class VitalProductDataReader:
                 if len(data) < l:
                     raise VPDDataException('VPD data is truncated!')
                 checksum =\
-                    self._combine_checksum(checksum, bytearray([header_sum]))
+                        self._combine_checksum(checksum, bytearray([header_sum]))
                 checksum =\
-                    self._combine_checksum(checksum, bytearray(data))
+                        self._combine_checksum(checksum, bytearray(data))
 
                 if checksum != 0:
                     raise VPDDataException('VPD-R checksum failed!')
@@ -137,4 +137,4 @@ class VitalProductDataReader:
                 # This is a VPD-W tag (i.e. read/write data, skip it).
                 f.seek(l, io.SEEK_CUR)
             elif tag != 0xF:
-                raise VPDDataException('Unknown VPD tag {}!'.format(tag))
+                raise VPDDataException(f'Unknown VPD tag {tag}!')

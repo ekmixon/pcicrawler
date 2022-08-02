@@ -197,11 +197,7 @@ def align32(start, stop):
     # Mask off low bits of start to align down
     astart = start & ~0b11
     # If stop is aligned leave as is
-    if stop & 0b11 == 0:
-        astop = stop
-    else:
-        # Otherwise align-down and add 4
-        astop = (stop & ~0b11) + 4
+    astop = stop if stop & 0b11 == 0 else (stop & ~0b11) + 4
     return astart, astop
 
 
@@ -222,14 +218,9 @@ class PCIConfigSpace(object):
 
     def __init__(self, devname):
         if devname in PCIConfigSpace.configspaces:
-            raise Exception(
-                'Attempt to open PCI config space twice for device: {}'.
-                format(self)
-            )
+            raise Exception(f'Attempt to open PCI config space twice for device: {self}')
         self.device_name = devname
-        self.path = '{}{}/config'.format(
-            SYSFS_PCI_BUS_DEVICES, self.device_name
-        )
+        self.path = f'{SYSFS_PCI_BUS_DEVICES}{self.device_name}/config'
         self.fd = None
         self.open()
         self.size = self._stat_size()
@@ -274,19 +265,17 @@ class PCIConfigSpace(object):
             self.fd = None
 
     def __getitem__(self, k):
-        if isinstance(k, slice):
-            if k.step is not None:
-                raise Exception('Cannot step in PCI config space')
-            start = k.start
-            stop = k.stop
-        else:
+        if not isinstance(k, slice):
             raise Exception('Can only use slices to index config space')
+        if k.step is not None:
+            raise Exception('Cannot step in PCI config space')
+        start = k.start
+        stop = k.stop
         if stop > self.size:
             raise Exception(
-                'Attempt to read at {}, past end of config space: {}'.format(
-                    (start, stop), self
-                )
+                f'Attempt to read at {(start, stop)}, past end of config space: {self}'
             )
+
         data = self.cache[start:stop]
         if any(d is None for d in data):
             self.open()
@@ -308,9 +297,7 @@ class PCIConfigSpace(object):
         return PCIConfigSpace(devname)
 
     def __repr__(self):
-        return 'PCIConfigSpace(\'{}\', sz={})'.format(
-            self.device_name, self.size
-        )
+        return f"PCIConfigSpace(\'{self.device_name}\', sz={self.size})"
 
 
 @contextmanager
@@ -363,9 +350,11 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
         mypath = realpath(mypath)
         parentpath = realpath(os.path.join(mypath, '..'))
         parentdev = os.path.basename(parentpath)
-        if not re.match(LONG_PCI_ADDR_REGEX, parentdev):
-            return None
-        return map_pci_device(parentdev)
+        return (
+            map_pci_device(parentdev)
+            if re.match(LONG_PCI_ADDR_REGEX, parentdev)
+            else None
+        )
 
     @cached_property
     def name(self):
@@ -374,10 +363,10 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
         /usr/share/hwdata/pci.ids to map vendor and device ID to names.
         """
         vendor, device = lookup_device(self.vendor_id, self.device_id)
-        if vendor and device:
-            return '{} ({:04x}) {} ({:04x})'.format(
-                vendor, self.vendor_id, device, self.device_id)
         if vendor:
+            if device:
+                return '{} ({:04x}) {} ({:04x})'.format(
+                    vendor, self.vendor_id, device, self.device_id)
             return '{} ({:04x}), device {:04x}'.format(
                 vendor, self.vendor_id, self.device_id)
         return '{:04x}:{:04x}'.format(self.vendor_id, self.device_id)
@@ -391,31 +380,27 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
         """
         path = self.get_path()
         slotmap = get_dmidecode_pci_slots()
-        connection = path[1:]
-        if connection:
-            pathels = []
-            for dev in connection:
-                pathpart = []
-                dmislot = slotmap.get(dev.device_name)
-                if dmislot:
-                    pathels.append(dmislot['designation'])
-                    continue
-                explink = dev.express_link
-                exptype = dev.express_type
-                slot = dev.express_slot
-                if slot:
-                    pathpart.append('slot {}'.format(slot.slot))
-                if explink:
-                    pathpart.append('{}'.format(exptype))
-                if pathpart:
-                    pathels.append(', '.join(pathpart))
-            return ' -> '.join(pathels)
-        else:
+        if not (connection := path[1:]):
             return None
+        pathels = []
+        for dev in connection:
+            pathpart = []
+            if dmislot := slotmap.get(dev.device_name):
+                pathels.append(dmislot['designation'])
+                continue
+            explink = dev.express_link
+            if slot := dev.express_slot:
+                pathpart.append(f'slot {slot.slot}')
+            if explink:
+                exptype = dev.express_type
+                pathpart.append(f'{exptype}')
+            if pathpart:
+                pathels.append(', '.join(pathpart))
+        return ' -> '.join(pathels)
 
     @cached_property
     def vpd(self):
-        vpdfile = '{}{}/vpd'.format(SYSFS_PCI_BUS_DEVICES, self.device_name)
+        vpdfile = f'{SYSFS_PCI_BUS_DEVICES}{self.device_name}/vpd'
         if os.path.exists(vpdfile):
             try:
                 vpdreader = VitalProductDataReader(vpdfile)
@@ -460,8 +445,7 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
             if express is None:
                 return None
             flags = read_u16(config, express + PCI_CAP_FLAGS)
-            version = flags & 0xf
-            return version
+            return flags & 0xf
 
     @cached_property
     def express_slot(self):
@@ -540,9 +524,7 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
                                              'aer_rootport_total_err_nonfatal'])
             if rp_counts is not None:
                 aer["rootport"] = rp_counts
-        if len(aer) == 0:
-            return None
-        return aer
+        return aer or None
 
     @cached_property
     def express_type(self):
@@ -554,8 +536,7 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
             if express is None:
                 return None
             flags = read_u16(config, express + PCI_CAP_FLAGS)
-            exptype = EXPRESS_TYPES.get((flags & 0xf0) >> 4)
-            return exptype
+            return EXPRESS_TYPES.get((flags & 0xf0) >> 4)
 
     @cached_property
     def express_link(self):
@@ -656,7 +637,7 @@ def aer_dev_stats(device_name, stat_names):
             #   BadTLP 0
             #   BadDLLP 0
             stats = {}
-            for line in file_obj.readlines():
+            for line in file_obj:
                 key, value = line.strip().split()
                 try:
                     stats[key] = int(value)
@@ -664,9 +645,7 @@ def aer_dev_stats(device_name, stat_names):
                     pass
             dev_stats[stat_name] = stats
 
-    if len(dev_stats) == 0:
-        return None
-    return dev_stats
+    return dev_stats or None
 
 
 def aer_rootport_counts(device_name, count_names):
@@ -689,10 +668,7 @@ def aer_rootport_counts(device_name, count_names):
             except ValueError:
                 pass
 
-    if len(rootport_counts) == 0:
-        return None
-
-    return rootport_counts
+    return rootport_counts or None
 
 
 def map_pci_device(device_name):
@@ -724,12 +700,13 @@ def find_devices(**kwargs):
     for pci_device in list_devices():
         for key, val in kwargs.items():
             v = getattr(pci_device, key)
-            if isinstance(val, (list, tuple, set)):
-                if v not in val:
-                    break
-            else:
-                if v != val:
-                    break
+            if (
+                isinstance(val, (list, tuple, set))
+                and v not in val
+                or not isinstance(val, (list, tuple, set))
+                and v != val
+            ):
+                break
         else:
             # all specified keys match
             yield pci_device
@@ -780,11 +757,8 @@ def shorten_pci_addr(pci_addr):
     if m1:
         if m1.group(1) != '0000':
             raise NonZeroDomain()
-        pci_addr = '{}:{}.{}'.format(
-            m1.group(2), m1.group(3), m1.group(4))
-    elif m2:
-        pass
-    else:
+        pci_addr = f'{m1.group(2)}:{m1.group(3)}.{m1.group(4)}'
+    elif not m2:
         log.error('Invalid pci address %s', pci_addr)
         pci_addr = None
 
@@ -797,11 +771,10 @@ def load_pci_ids():
         "/usr/share/hwdata/pci.ids",
         "/usr/share/misc/pci.ids",
     ]
-    pci_ids_location = None
-    for loc in pci_ids_locations:
-        if os.path.isfile(loc):
-            pci_ids_location = loc
-            break
+    pci_ids_location = next(
+        (loc for loc in pci_ids_locations if os.path.isfile(loc)), None
+    )
+
     if not pci_ids_location:
         raise RuntimeError(
             "No pci.ids file avail in %r" % pci_ids_locations
@@ -853,13 +826,11 @@ def get_pci_db():
     global no_pci_db
     if no_pci_db:
         return None
-    if pci_db:
-        return pci_db
-    else:
+    if not pci_db:
         pci_db = load_pci_ids()
         if pci_db is None:
             no_pci_db = True
-        return pci_db
+    return pci_db
 
 
 def lookup_device(vendorid, deviceid):
